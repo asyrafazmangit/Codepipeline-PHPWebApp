@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CodePipeline resources for Jenkins deployment'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: asyraf-poc
+    Description: Name of the project
+
+Resources:
+  # S3 Bucket for artifacts
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ProjectName}-pipeline-artifacts-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+
+  # ECR Repository
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ProjectName}-php-app
+
+  # ECS Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-task
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Sub
+        - arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-ECS-TaskExecutionRole
+        - ProjectName: !Ref ProjectName
+      ContainerDefinitions:
+        - Name: php-app
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}:latest
+          PortMappings:
+            - ContainerPort: 80
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub /ecs/${ProjectName}
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub ${ProjectName}-service
+      Cluster: !Sub ${ProjectName}-cluster
+      LaunchType: FARGATE
+      DesiredCount: 1
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-ECS-SecurityGroup
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PrivateSubnet1-ID
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PrivateSubnet2-ID
+      LoadBalancers:
+        - ContainerName: php-app
+          ContainerPort: 80
+          TargetGroupArn: !ImportValue
+            Fn::Sub: ${ProjectName}-TargetGroup-ARN
+
+  # IAM User for Jenkins Pipeline
+  JenkinsPipelineUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub ${ProjectName}-jenkins-pipeline-user
+      Policies:
+        - PolicyName: JenkinsPipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - ecs:DescribeServices
+                  - ecs:DescribeTaskDefinition
+                  - ecs:UpdateService
+                  - ecs:RegisterTaskDefinition
+                  - s3:GetObject
+                  - s3:PutObject
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # Access Key for Jenkins Pipeline User
+  JenkinsPipelineUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref JenkinsPipelineUser
+
+Outputs:
+  ECRRepositoryURI:
+    Description: ECR Repository URI
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}
+
+  ArtifactsBucketName:
+    Description: S3 Artifacts Bucket Name
+    Value: !Ref ArtifactsBucket
+
+  TaskDefinitionArn:
+    Description: ECS Task Definition ARN
+    Value: !Ref TaskDefinition
+
+  ECSServiceName:
+    Description: ECS Service Name
+    Value: !Ref ECSService
+
+  JenkinsPipelineUserName:
+    Description: Jenkins Pipeline User Name
+    Value: !Ref JenkinsPipelineUser
+
+  JenkinsPipelineAccessKeyId:
+    Description: Jenkins Pipeline Access Key ID
+    Value: !Ref JenkinsPipelineUserAccessKey
+
+  JenkinsPipelineSecretAccessKey:
+    Description: Jenkins Pipeline Secret Access Key
+    Value: !GetAtt JenkinsPipelineUserAccessKey.SecretAccessKey

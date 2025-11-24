@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Infrastructure for PHP Web App - VPC, ECS, NAT Gateway'
+Description: 'AWS Services for PHP Web App - VPC, ECS, ALB'
 
 Parameters:
   ProjectName:
     Type: String
-    Default: php-webapp
+    Default: asyraf-poc
     Description: Name of the project
 
 Resources:
@@ -77,7 +77,7 @@ Resources:
         - Key: Name
           Value: !Sub ${ProjectName}-private-subnet-2
 
-  # NAT Gateways
+  # NAT Gateway
   NatGateway1EIP:
     Type: AWS::EC2::EIP
     DependsOn: InternetGatewayAttachment
@@ -158,10 +158,6 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
 
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -180,51 +176,6 @@ Resources:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub ${ProjectName}-cluster
-
-  # ECS Task Definition
-  TaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: !Sub ${ProjectName}-task
-      Cpu: 256
-      Memory: 512
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      ExecutionRoleArn: !Ref ECSTaskExecutionRole
-      ContainerDefinitions:
-        - Name: php-app
-          Image: php:8.1-apache
-          PortMappings:
-            - ContainerPort: 80
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref CloudWatchLogsGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: ecs
-
-  # ECS Service
-  ECSService:
-    Type: AWS::ECS::Service
-    DependsOn: LoadBalancerListener
-    Properties:
-      ServiceName: !Sub ${ProjectName}-service
-      Cluster: !Ref ECSCluster
-      LaunchType: FARGATE
-      DesiredCount: 2
-      TaskDefinition: !Ref TaskDefinition
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          SecurityGroups:
-            - !Ref ECSSecurityGroup
-          Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
-      LoadBalancers:
-        - ContainerName: php-app
-          ContainerPort: 80
-          TargetGroupArn: !Ref TargetGroup
 
   # Application Load Balancer
   ApplicationLoadBalancer:
@@ -257,7 +208,14 @@ Resources:
       Port: 80
       Protocol: HTTP
 
-  # IAM Roles
+  # CloudWatch Logs
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${ProjectName}
+      RetentionInDays: 7
+
+  # IAM Role for ECS Task Execution
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -270,12 +228,28 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  # CloudWatch Logs
-  CloudWatchLogsGroup:
-    Type: AWS::Logs::LogGroup
+  # IAM User for Jenkins
+  JenkinsUser:
+    Type: AWS::IAM::User
     Properties:
-      LogGroupName: !Sub /ecs/${ProjectName}
-      RetentionInDays: 7
+      UserName: !Sub ${ProjectName}-jenkins-user
+      Policies:
+        - PolicyName: JenkinsECSPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:*
+                  - ecr:*
+                  - logs:*
+                  - iam:PassRole
+                Resource: '*'
+
+  JenkinsUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref JenkinsUser
 
 Outputs:
   VPCId:
@@ -284,14 +258,56 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-VPC-ID
 
-  ECSCluster:
+  PrivateSubnet1Id:
+    Description: Private Subnet 1 ID
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${ProjectName}-PrivateSubnet1-ID
+
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub ${ProjectName}-PrivateSubnet2-ID
+
+  ECSClusterName:
     Description: ECS Cluster Name
     Value: !Ref ECSCluster
     Export:
       Name: !Sub ${ProjectName}-ECS-Cluster
 
+  ECSSecurityGroupId:
+    Description: ECS Security Group ID
+    Value: !Ref ECSSecurityGroup
+    Export:
+      Name: !Sub ${ProjectName}-ECS-SecurityGroup
+
+  TargetGroupArn:
+    Description: Target Group ARN
+    Value: !Ref TargetGroup
+    Export:
+      Name: !Sub ${ProjectName}-TargetGroup-ARN
+
+  ECSTaskExecutionRoleArn:
+    Description: ECS Task Execution Role ARN
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name: !Sub ${ProjectName}-ECS-TaskExecutionRole
+
+  CloudWatchLogsGroup:
+    Description: CloudWatch Logs Group
+    Value: !Ref CloudWatchLogsGroup
+    Export:
+      Name: !Sub ${ProjectName}-CloudWatch-LogGroup
+
   LoadBalancerURL:
     Description: Load Balancer URL
     Value: !Sub http://${ApplicationLoadBalancer.DNSName}
-    Export:
-      Name: !Sub ${ProjectName}-ALB-URL
+
+  JenkinsAccessKeyId:
+    Description: Jenkins User Access Key ID
+    Value: !Ref JenkinsUserAccessKey
+
+  JenkinsSecretAccessKey:
+    Description: Jenkins User Secret Access Key
+    Value: !GetAtt JenkinsUserAccessKey.SecretAccessKey
