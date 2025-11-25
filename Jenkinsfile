@@ -9,15 +9,18 @@ pipeline {
         ECS_CLUSTER = 'asyraf-poc-cluster'
         ECS_SERVICE = 'asyraf-poc-service'
         TASK_DEFINITION = 'asyraf-poc-task'
+        PATH = "$PATH:$HOME/.local/bin"
     }
     
     stages {
         stage('Install AWS CLI') {
             steps {
                 sh '''
+                    rm -rf aws awscliv2.zip ~/.local/aws-cli ~/.local/bin/aws
                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                    unzip -q awscliv2.zip
-                    sudo ./aws/install --update
+                    unzip -o -q awscliv2.zip
+                    ./aws/install --install-dir ~/.local/aws-cli --bin-dir ~/.local/bin
+                    export PATH=$PATH:~/.local/bin
                     aws --version
                 '''
             }
