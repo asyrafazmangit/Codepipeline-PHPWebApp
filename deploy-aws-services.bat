@@ -4,7 +4,7 @@ echo Deploying AWS Services Stack...
 aws cloudformation deploy ^
     --template-file aws-services.yaml ^
     --stack-name asyraf-poc-aws-services ^
-    --capabilities CAPABILITY_IAM ^
+    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM ^
     --region ap-southeast-1
 
 if %ERRORLEVEL% EQU 0 (
@@ -27,6 +27,13 @@ if %ERRORLEVEL% EQU 0 (
         --output text ^
         --region ap-southeast-1
     echo ========================================
+    echo.
+    echo ECR Repository URI:
+    aws cloudformation describe-stacks ^
+        --stack-name asyraf-poc-aws-services ^
+        --query "Stacks[0].Outputs[?OutputKey=='ECRRepositoryURI'].OutputValue" ^
+        --output text ^
+        --region ap-southeast-1
     echo.
     echo Load Balancer URL:
     aws cloudformation describe-stacks ^
