@@ -3,6 +3,7 @@ pipeline {
     
     environment {
         AWS_REGION = 'ap-southeast-1'
+        AWS_ACCOUNT_ID = '180016241382'
         ECR_REPOSITORY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/asyraf-poc-php-app"
         IMAGE_TAG = "${BUILD_NUMBER}"
         ECS_CLUSTER = 'asyraf-poc-cluster'
@@ -11,9 +12,14 @@ pipeline {
     }
     
     stages {
-        stage('Checkout') {
+        stage('Install AWS CLI') {
             steps {
-                checkout scm
+                sh '''
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    unzip -q awscliv2.zip
+                    sudo ./aws/install --update
+                    aws --version
+                '''
             }
         }
         
@@ -32,7 +38,7 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY}
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                         docker push ${ECR_REPOSITORY}:${IMAGE_TAG}
                         docker push ${ECR_REPOSITORY}:latest
                     '''
